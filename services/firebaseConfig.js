@@ -7,16 +7,17 @@ import { getFirestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyD_PYF4HwJYq1X283XPiAFs5o7ryJr-OLs",
-  authDomain: "progresso-orm.firebaseapp.com",
-  projectId: "progresso-orm",
-  storageBucket: "progresso-orm.firebasestorage.app",
-  messagingSenderId: "738374778754",
-  appId: "1:738374778754:web:631c510b63a70ea6d4199b",
-  measurementId: "G-CFCWHPD81S"
-};
+import { API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, APP_ID, MEASUREMENT_ID } from '@env';
 
+const firebaseConfig = {
+  apiKey: API_KEY,
+  authDomain: AUTH_DOMAIN,
+  projectId: PROJECT_ID,
+  storageBucket: STORAGE_BUCKET,
+  messagingSenderId: MESSAGING_SENDER_ID,
+  appId: APP_ID,
+  measurementId: MEASUREMENT_ID
+};
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
