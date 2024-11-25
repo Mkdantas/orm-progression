@@ -17,14 +17,104 @@ import {
   RefreshControl,
   ScrollView,
 } from 'react-native-gesture-handler';
+import * as Notifications from 'expo-notifications';
+import * as TaskManager from 'expo-task-manager';
+import * as BackgroundFetch from 'expo-background-fetch';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function TabTwoScreen() {
   const router = useRouter();
   const [data, setData] = useState<DocumentData>([]);
   const access = 'bispado';
 
-  function isDue(targetDate:any, difference:number) {
-    const currentDate:any = new Date(); // Current date and time
+  // Set notification handler
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+
+  // Function to send a notification
+  const sendNotification = async (title, body) => {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+      },
+      trigger: null, // Immediate trigger
+    });
+  };
+
+  // Task identifier
+  const BACKGROUND_CHECK_TASK = 'check-due-dates';
+
+  TaskManager.defineTask(BACKGROUND_CHECK_TASK, async () => {
+    try {
+      // Get stored due dates
+      const storedData = await AsyncStorage.getItem('dueDates');
+      const dueDates = storedData ? JSON.parse(storedData) : [];
+
+      const today = new Date().toISOString().split('T')[0];
+
+      // Check if any due date matches today
+      dueDates.forEach((item) => {
+        if (item.date === today) {
+          sendNotification('Lembrete', `Acompanhe as metas deste(a) jovem: ${item.task}`);
+        }
+      });
+
+      return BackgroundFetch.Result.NewData;
+    } catch (error) {
+      console.error(error);
+      return BackgroundFetch.Result.Failed;
+    }
+  });
+
+  const registerBackgroundTask = async () => {
+    const status = await BackgroundFetch.getStatusAsync();
+  
+    if (status === BackgroundFetch.Status.Restricted || status === BackgroundFetch.Status.Denied) {
+      console.log('Background fetch is not available.');
+      return;
+    }
+  
+    const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_CHECK_TASK);
+  
+    if (!isRegistered) {
+      await BackgroundFetch.registerTaskAsync(BACKGROUND_CHECK_TASK, {
+        minimumInterval: 60 * 60 * 24, // Check every 24 hours
+        stopOnTerminate: false, // Keep running after the app is terminated
+        startOnBoot: true,      // Start task on device boot
+      });
+      console.log('Background fetch task registered.');
+    }
+  };
+
+  const saveDueDates = async (data) => {
+     // Get existing schedules from AsyncStorage
+  const storedData = await AsyncStorage.getItem('dueDates');
+  const dueDates = storedData ? JSON.parse(storedData) : [];
+
+  // Check if the new due date already exists
+  const exists = dueDates.some(
+    item => item.task === data.task && item.date === data.date
+  );
+
+  if (exists) {
+    console.log('Schedule already exists for this task and date.');
+    return; // Exit early if the schedule already exists
+  }
+
+  // Add the new due date and save it
+  dueDates.push(data);
+  await AsyncStorage.setItem('dueDates', JSON.stringify(dueDates));
+
+  };
+
+  function isDue(targetDate: any, difference: number) {
+    const currentDate: any = new Date(); // Current date and time
     const differenceInMilliseconds = currentDate - targetDate; // Difference in milliseconds
     const differenceInDays = differenceInMilliseconds / (1000 * 60 * 60 * 24); // Convert to days
     return differenceInDays >= difference;
@@ -48,8 +138,28 @@ export default function TabTwoScreen() {
     });
     setData(jovens);
   };
+
+  
   useEffect(() => {
     getData();
+    saveDueDates(data.map((d) => {
+      const trueCount = d.progress.filter(
+        (value: Record<string, boolean>) =>
+          value[Object.keys(value)[0]] === true
+      ).length;
+      const pastDate = new Date(d.goal?.timestamp.seconds * 1000 +
+      d.goal?.timestamp.nanoseconds / 1e6)
+
+      if(trueCount <= 3){
+        return { task: d.name, date: new Date(pastDate.getDate() + 15)}
+      } else if(trueCount > 3 && trueCount <=6){
+        return { task: d.name, date: new Date(pastDate.getDate() + 30)}
+      } else if(trueCount > 6){
+        return { task: d.name, date: new Date(pastDate.getDate() + 40)}
+      }
+    }))
+    Notifications.requestPermissionAsync();
+    registerBackgroundTask();
   }, []);
 
   return (
@@ -78,65 +188,112 @@ export default function TabTwoScreen() {
                 <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
               }
             >
-                <List.Section style={styles.stepContainer}>
-                  <List.Subheader style={styles.stepTitle}>
-                    Preocupantes
-                  </List.Subheader>
-                  <Divider />
-                  {data &&
-                    data.map(
-                      (jovem: any) =>{
-                        const trueCount = jovem.progress.filter((value:Record<string, boolean>) => value[Object.keys(value)[0]] === true).length;
-                        
-                        return trueCount <= 3 && (
-                          <List.Item
-                            key={jovem.id}
-                            right={() => isDue(new Date(jovem.goal?.timestamp.seconds * 1000 + jovem.goal?.timestamp.nanoseconds / 1e6), 1) && (<Text style={{color: 'red'}}>Meta vencida</Text>) }
-                            onPress={() => router.push(`/jovem/${jovem.id}`)}
-                            titleStyle={styles.item}
-                            title={jovem.name}
-                          />
-                        )}
-                    )}
-                </List.Section>
               <List.Section style={styles.stepContainer}>
-                <List.Subheader style={styles.stepTitle}>Progredindo</List.Subheader>
+                <List.Subheader style={styles.stepTitle}>
+                  Preocupantes
+                </List.Subheader>
                 <Divider />
                 {data &&
-                    data.map(
-                      (jovem: any) =>{
-                        const trueCount = jovem.progress.filter((value:Record<string, boolean>) => value[Object.keys(value)[0]] === true).length;
-                        
-                        return trueCount > 3 && trueCount <= 6 && (
-                          <List.Item
-                            key={jovem.id}
-                            right={() => isDue(new Date(jovem.goal?.timestamp.seconds * 1000 + jovem.goal?.timestamp.nanoseconds / 1e6), 1) && (<Text style={{color: 'red'}}>Meta vencida</Text>) }
-                            onPress={() => router.push(`/jovem/${jovem.id}`)}
-                            titleStyle={styles.item}
-                            title={jovem.name}
-                          />
-                        )}
-                    )}
+                  data.map((jovem: any) => {
+                    const trueCount = jovem.progress.filter(
+                      (value: Record<string, boolean>) =>
+                        value[Object.keys(value)[0]] === true
+                    ).length;
+
+                    return (
+                      trueCount <= 3 && (
+                        <List.Item
+                          key={jovem.id}
+                          right={() =>
+                            isDue(
+                              new Date(
+                                jovem.goal?.timestamp.seconds * 1000 +
+                                  jovem.goal?.timestamp.nanoseconds / 1e6
+                              ),
+                              15
+                            ) && (
+                              <Text style={{ color: 'red' }}>Meta vencida</Text>
+                            )
+                          }
+                          onPress={() => router.push(`/jovem/${jovem.id}`)}
+                          titleStyle={styles.item}
+                          title={jovem.name}
+                        />
+                      )
+                    );
+                  })}
+              </List.Section>
+              <List.Section style={styles.stepContainer}>
+                <List.Subheader style={styles.stepTitle}>
+                  Progredindo
+                </List.Subheader>
+                <Divider />
+                {data &&
+                  data.map((jovem: any) => {
+                    const trueCount = jovem.progress.filter(
+                      (value: Record<string, boolean>) =>
+                        value[Object.keys(value)[0]] === true
+                    ).length;
+
+                    return (
+                      trueCount > 3 &&
+                      trueCount <= 6 && (
+                        <List.Item
+                          key={jovem.id}
+                          right={() =>
+                            isDue(
+                              new Date(
+                                jovem.goal?.timestamp.seconds * 1000 +
+                                  jovem.goal?.timestamp.nanoseconds / 1e6
+                              ),
+                              30
+                            ) && (
+                              <Text style={{ color: 'red' }}>Meta vencida</Text>
+                            )
+                          }
+                          onPress={() => router.push(`/jovem/${jovem.id}`)}
+                          titleStyle={styles.item}
+                          title={jovem.name}
+                        />
+                      )
+                    );
+                  })}
               </List.Section>
 
               <List.Section style={styles.stepContainer}>
-                <List.Subheader style={styles.stepTitle}>Autossuficientes</List.Subheader>
+                <List.Subheader style={styles.stepTitle}>
+                  Autossuficientes
+                </List.Subheader>
                 <Divider />
                 {data &&
-                    data.map(
-                      (jovem: any) =>{
-                        const trueCount = jovem.progress.filter((value:Record<string, boolean>) => value[Object.keys(value)[0]] === true).length;
-                        
-                        return trueCount > 6 && (
-                          <List.Item
-                            key={jovem.id}
-                            right={() => isDue(new Date(jovem.goal?.timestamp.seconds * 1000 + jovem.goal?.timestamp.nanoseconds / 1e6), 1) && (<Text style={{color: 'red'}}>Meta vencida</Text>) }
-                            onPress={() => router.push(`/jovem/${jovem.id}`)}
-                            titleStyle={styles.item}
-                            title={jovem.name}
-                          />
-                        )}
-                    )}
+                  data.map((jovem: any) => {
+                    const trueCount = jovem.progress.filter(
+                      (value: Record<string, boolean>) =>
+                        value[Object.keys(value)[0]] === true
+                    ).length;
+
+                    return (
+                      trueCount > 6 && (
+                        <List.Item
+                          key={jovem.id}
+                          right={() =>
+                            isDue(
+                              new Date(
+                                jovem.goal?.timestamp.seconds * 1000 +
+                                  jovem.goal?.timestamp.nanoseconds / 1e6
+                              ),
+                              40
+                            ) && (
+                              <Text style={{ color: 'red' }}>Meta vencida</Text>
+                            )
+                          }
+                          onPress={() => router.push(`/jovem/${jovem.id}`)}
+                          titleStyle={styles.item}
+                          title={jovem.name}
+                        />
+                      )
+                    );
+                  })}
               </List.Section>
             </ScrollView>
           </View>
@@ -181,6 +338,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#003058',
   },
   scrollView: {
-    flex: 1
+    flex: 1,
   },
 });
